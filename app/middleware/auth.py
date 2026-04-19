@@ -10,7 +10,6 @@ async def verify_auth(request: Request) -> None:
 
     Checks, in order:
         1. X-RapidAPI-Proxy-Secret
-        2. X-Apilayer-Proxy-Secret
         3. X-Zyla-API-Gateway-Secret
         4. X-API-Key  (master / direct access)
 
@@ -18,7 +17,6 @@ async def verify_auth(request: Request) -> None:
     """
     checks = [
         (settings.rapidapi_proxy_secret, "x-rapidapi-proxy-secret"),
-        (settings.apilayer_proxy_secret, "x-apilayer-proxy-secret"),
         (settings.zyla_proxy_secret, "x-zyla-api-gateway-secret"),
         (settings.master_api_key, "x-api-key"),
     ]

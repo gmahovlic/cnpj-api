@@ -12,7 +12,6 @@ class Settings(BaseSettings):
 
     # Auth — marketplace proxy secrets
     rapidapi_proxy_secret: str = ""
-    apilayer_proxy_secret: str = ""
     zyla_proxy_secret: str = ""
     master_api_key: str = ""
 

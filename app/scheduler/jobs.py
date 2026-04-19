@@ -110,7 +110,11 @@ def import_receita() -> None:
         session.headers.update({"Connection": "keep-alive"})
 
         print("[receita] Resolving latest batch…", flush=True)
-        base_url, batch_date, links = _resolve_latest_batch(session)
+        result = _resolve_latest_batch(session)
+        if result is None:
+            print("[receita] No valid batch found — will retry next run", flush=True)
+            return
+        base_url, batch_date, links = result
         batch_name = batch_date.strftime("%Y-%m")
         print(f"[receita] Latest batch: {batch_name} ({base_url})", flush=True)
 
@@ -143,15 +147,32 @@ def import_receita() -> None:
             with tempfile.TemporaryDirectory(prefix="receita_") as tmp_dir:
                 root = Path(tmp_dir)
 
-                _download_files(session, links, root)
-
                 for category, table in DOMAIN_TABLES.items():
-                    _import_domain_table(conn, root / category, table)
+                    print(f"[receita] Importing {table}…", flush=True)
+                    count = _stream_category(
+                        session, links, category, root,
+                        lambda files, t=table: _import_domain_files(conn, files, t),
+                    )
+                    print(f"[receita]   {table}: {count:,} rows", flush=True)
 
-                _import_empresas(conn, root)
-                _import_estabelecimentos(conn, root)
-                _import_simples(conn, root)
-                _import_socios(conn, root)
+                for label, category, fn in [
+                    ("empresas", "Empresas", lambda f: _import_empresas_files(conn, f)),
+                    ("estabelecimentos", "Estabelecimentos", lambda f: _import_estabelecimentos_files(conn, f)),
+                    ("simples", "Simples", lambda f: _import_simples_files(conn, f)),
+                ]:
+                    print(f"[receita] Importing {label}…", flush=True)
+                    count = _stream_category(session, links, category, root, fn)
+                    print(f"[receita]   Total: {count:,} {label}", flush=True)
+
+                # Socios uses a staging table for atomic swap
+                print("[receita] Importing socios…", flush=True)
+                _setup_socios_staging(conn)
+                count = _stream_category(
+                    session, links, "Socios", root,
+                    lambda f: _import_socios_files(conn, f),
+                )
+                _finalize_socios_staging(conn)
+                print(f"[receita]   Total: {count:,} socios", flush=True)
 
             conn.execute("ANALYZE")
             conn.execute(
@@ -175,15 +196,38 @@ def import_receita() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Streaming helper
+# ---------------------------------------------------------------------------
+
+
+def _stream_category(
+    session: requests.Session,
+    links: Dict[str, List[str]],
+    category: str,
+    root: Path,
+    process_files,
+) -> int:
+    """Download one zip at a time, process its CSVs, delete them."""
+    total = 0
+    for url in links.get(category, []):
+        files = _download_and_extract(session, url, root)
+        try:
+            total += process_files(files)
+        finally:
+            for f in files:
+                f.unlink(missing_ok=True)
+    return total
+
+
+# ---------------------------------------------------------------------------
 # Table import helpers
 # ---------------------------------------------------------------------------
 
 
-def _import_domain_table(conn: sqlite3.Connection, folder: Path, table: str) -> None:
-    print(f"[receita] Importing {table}…", flush=True)
+def _import_domain_files(conn: sqlite3.Connection, files: List[Path], table: str) -> int:
     count = 0
     batch: list[tuple] = []
-    for fp in _get_dataset_files(folder):
+    for fp in files:
         for row in _iter_csv_rows(fp):
             if len(row) < 2:
                 continue
@@ -206,11 +250,10 @@ def _import_domain_table(conn: sqlite3.Connection, folder: Path, table: str) -> 
         )
         conn.commit()
         count += len(batch)
-    print(f"[receita]   {table}: {count:,} rows", flush=True)
+    return count
 
 
-def _import_empresas(conn: sqlite3.Connection, root: Path) -> None:
-    print("[receita] Importing empresas…", flush=True)
+def _import_empresas_files(conn: sqlite3.Connection, files: List[Path]) -> int:
     count = 0
     batch: list[tuple] = []
     sql = (
@@ -219,7 +262,7 @@ def _import_empresas(conn: sqlite3.Connection, root: Path) -> None:
         "qualificacao_responsavel, capital_social, porte, ente_federativo) "
         "VALUES (?,?,?,?,?,?,?)"
     )
-    for fp in _get_dataset_files(root / "Empresas"):
+    for fp in files:
         for row in _iter_csv_rows(fp):
             if len(row) < 7:
                 continue
@@ -238,11 +281,10 @@ def _import_empresas(conn: sqlite3.Connection, root: Path) -> None:
         conn.executemany(sql, batch)
         conn.commit()
         count += len(batch)
-    print(f"[receita]   Total: {count:,} empresas", flush=True)
+    return count
 
 
-def _import_estabelecimentos(conn: sqlite3.Connection, root: Path) -> None:
-    print("[receita] Importing estabelecimentos…", flush=True)
+def _import_estabelecimentos_files(conn: sqlite3.Connection, files: List[Path]) -> int:
     count = 0
     batch: list[tuple] = []
     sql = (
@@ -255,7 +297,7 @@ def _import_estabelecimentos(conn: sqlite3.Connection, root: Path) -> None:
         "fax, correio_eletronico, situacao_especial, data_situacao_especial) "
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
     )
-    for fp in _get_dataset_files(root / "Estabelecimentos"):
+    for fp in files:
         for row in _iter_csv_rows(fp):
             if len(row) < 30:
                 continue
@@ -280,11 +322,10 @@ def _import_estabelecimentos(conn: sqlite3.Connection, root: Path) -> None:
         conn.executemany(sql, batch)
         conn.commit()
         count += len(batch)
-    print(f"[receita]   Total: {count:,} estabelecimentos", flush=True)
+    return count
 
 
-def _import_simples(conn: sqlite3.Connection, root: Path) -> None:
-    print("[receita] Importing simples…", flush=True)
+def _import_simples_files(conn: sqlite3.Connection, files: List[Path]) -> int:
     count = 0
     batch: list[tuple] = []
     sql = (
@@ -292,7 +333,7 @@ def _import_simples(conn: sqlite3.Connection, root: Path) -> None:
         "(cnpj_basico, opcao_simples, data_opcao_simples, data_exclusao_simples, "
         "opcao_mei, data_opcao_mei, data_exclusao_mei) VALUES (?,?,?,?,?,?,?)"
     )
-    for fp in _get_dataset_files(root / "Simples"):
+    for fp in files:
         for row in _iter_csv_rows(fp):
             if len(row) < 4:
                 continue
@@ -314,13 +355,10 @@ def _import_simples(conn: sqlite3.Connection, root: Path) -> None:
         conn.executemany(sql, batch)
         conn.commit()
         count += len(batch)
-    print(f"[receita]   Total: {count:,} simples", flush=True)
+    return count
 
 
-def _import_socios(conn: sqlite3.Connection, root: Path) -> None:
-    """Import partners using a staging table for atomic swap."""
-    print("[receita] Importing socios…", flush=True)
-
+def _setup_socios_staging(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS socios_new")
     conn.execute(
         "CREATE TABLE socios_new ("
@@ -340,6 +378,15 @@ def _import_socios(conn: sqlite3.Connection, root: Path) -> None:
     )
     conn.commit()
 
+
+def _finalize_socios_staging(conn: sqlite3.Connection) -> None:
+    conn.execute("DROP TABLE IF EXISTS socios")
+    conn.execute("ALTER TABLE socios_new RENAME TO socios")
+    conn.execute("CREATE INDEX idx_socios_basico ON socios(cnpj_basico)")
+    conn.commit()
+
+
+def _import_socios_files(conn: sqlite3.Connection, files: List[Path]) -> int:
     count = 0
     batch: list[tuple] = []
     sql = (
@@ -349,7 +396,7 @@ def _import_socios(conn: sqlite3.Connection, root: Path) -> None:
         "representante_qualificacao, faixa_etaria) "
         "VALUES (?,?,?,?,?,?,?,?,?,?,?)"
     )
-    for fp in _get_dataset_files(root / "Socios"):
+    for fp in files:
         for row in _iter_csv_rows(fp):
             if len(row) < 11:
                 continue
@@ -369,13 +416,7 @@ def _import_socios(conn: sqlite3.Connection, root: Path) -> None:
         conn.executemany(sql, batch)
         conn.commit()
         count += len(batch)
-
-    # Atomic swap
-    conn.execute("DROP TABLE IF EXISTS socios")
-    conn.execute("ALTER TABLE socios_new RENAME TO socios")
-    conn.execute("CREATE INDEX idx_socios_basico ON socios(cnpj_basico)")
-    conn.commit()
-    print(f"[receita]   Total: {count:,} socios", flush=True)
+    return count
 
 
 # ---------------------------------------------------------------------------
@@ -383,21 +424,10 @@ def _import_socios(conn: sqlite3.Connection, root: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _download_files(
-    session: requests.Session,
-    links: Dict[str, List[str]],
-    root: Path,
-) -> None:
-    print(f"[receita] Downloading to {root}", flush=True)
-    for category in CATEGORIES:
-        for url in links.get(category, []):
-            _download_and_extract(session, url, root / category)
-    print("[receita] Download complete", flush=True)
-
-
 def _download_and_extract(
     session: requests.Session, url: str, target_dir: Path
-) -> None:
+) -> List[Path]:
+    """Download a zip, extract CSVs, delete the zip. Returns extracted file paths."""
     target_dir.mkdir(parents=True, exist_ok=True)
     print(f"[receita] Downloading {url}", flush=True)
     with session.get(url, stream=True, timeout=(30, None)) as resp:
@@ -424,6 +454,7 @@ def _download_and_extract(
                         next_report += 50 * 1024 * 1024
                         last_report = time.monotonic()
             tmp_path = Path(tmp.name)
+    extracted: List[Path] = []
     try:
         with ZipFile(tmp_path) as archive:
             members = []
@@ -433,7 +464,7 @@ def _download_and_extract(
                     members.append((name, norm))
             if not members:
                 print(f"[receita]   No CSV in {url}", flush=True)
-                return
+                return extracted
             zip_stem = Path(urlparse(url).path).stem
             for orig, norm in members:
                 dest = target_dir / norm
@@ -442,8 +473,10 @@ def _download_and_extract(
                     dest = target_dir / f"{zip_stem}{suffix}"
                 with archive.open(orig) as src, dest.open("wb") as out:
                     shutil.copyfileobj(src, out)
+                extracted.append(dest)
     finally:
         tmp_path.unlink(missing_ok=True)
+    return extracted
 
 
 # ---------------------------------------------------------------------------
@@ -453,9 +486,11 @@ def _download_and_extract(
 
 def _resolve_latest_batch(
     session: requests.Session,
-) -> tuple[str, dt.date, Dict[str, List[str]]]:
+) -> Optional[tuple[str, dt.date, Dict[str, List[str]]]]:
+    """Try current month then up to 5 months back. Returns None when no batch is available."""
     today = dt.date.today()
-    for candidate in [today, _previous_month(today)]:
+    candidate = today
+    for _ in range(6):
         batch = f"{candidate.year:04d}-{candidate.month:02d}"
         base_url = _build_batch_url(settings.receita_base_url, batch)
         print(f"[receita] Trying batch {batch}", flush=True)
@@ -463,6 +498,7 @@ def _resolve_latest_batch(
             links = _discover_zip_links(session, base_url)
         except requests.RequestException as exc:
             print(f"[receita] Error fetching {batch}: {exc}", flush=True)
+            candidate = _previous_month(candidate)
             continue
         missing = [c for c in CATEGORIES if not links.get(c)]
         if missing:
@@ -470,9 +506,10 @@ def _resolve_latest_batch(
                 f"[receita] Batch {batch} missing: {', '.join(missing)}",
                 flush=True,
             )
+            candidate = _previous_month(candidate)
             continue
         return base_url, dt.date(candidate.year, candidate.month, 1), links
-    raise RuntimeError("Could not find a valid Receita Federal batch")
+    return None
 
 
 def _discover_zip_links(
@@ -558,10 +595,6 @@ def _iter_csv_rows(file_path: Path) -> Iterator[List[str]]:
         for row in reader:
             if row:
                 yield [col.strip() for col in row]
-
-
-def _get_dataset_files(folder: Path) -> List[Path]:
-    return sorted(folder.glob("*.CSV")) + sorted(folder.glob("*.csv"))
 
 
 def _normalize_member_filename(member: str) -> Optional[str]:

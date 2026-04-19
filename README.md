@@ -42,12 +42,11 @@ A primeira execução cria o banco vazio em `data/cnpj.db`. O scheduler inicia a
 
 ## Autenticação
 
-A API aceita requisições de marketplaces (RapidAPI, APILayer, Zyla) e acesso direto:
+A API aceita requisições de marketplaces (RapidAPI, Zyla) e acesso direto:
 
 | Header | Variável `.env` |
 |--------|-----------------|
 | `X-RapidAPI-Proxy-Secret` | `RAPIDAPI_PROXY_SECRET` |
-| `X-Apilayer-Proxy-Secret` | `APILAYER_PROXY_SECRET` |
 | `X-Zyla-API-Gateway-Secret` | `ZYLA_PROXY_SECRET` |
 | `X-API-Key` | `MASTER_API_KEY` |
 
