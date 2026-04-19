@@ -182,7 +182,7 @@ def import_receita() -> None:
             conn.commit()
             print(f"[receita] Batch {batch_name} imported successfully", flush=True)
 
-        except Exception as exc:
+        except BaseException as exc:
             conn.execute(
                 "UPDATE import_runs SET status = 'failure', finished_at = ?, notes = ? WHERE id = ?",
                 (dt.datetime.now().isoformat(), str(exc)[:1000], run_id),
