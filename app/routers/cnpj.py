@@ -322,3 +322,90 @@ async def consultar_cnpj(cnpj: str, db: aiosqlite.Connection = Depends(get_db)):
         ),
         "socios": socios_list,
     }
+
+
+@router.get("/cnpj/{cnpj}/filiais")
+async def listar_filiais(
+    cnpj: str,
+    pagina: int = 1,
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    digits = _clean_cnpj(cnpj)
+    if len(digits) != 14:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "CNPJ deve conter 14 dígitos"},
+        )
+
+    basico = digits[:8]
+
+    # Verify the CNPJ belongs to a matriz (identificador = '1')
+    cur = await db.execute(
+        "SELECT identificador FROM estabelecimentos "
+        "WHERE cnpj_basico = ? AND cnpj_ordem = ? AND cnpj_dv = ?",
+        (basico, digits[8:12], digits[12:14]),
+    )
+    matriz = await cur.fetchone()
+    if not matriz:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "CNPJ não encontrado"},
+        )
+    if matriz["identificador"] != "1":
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "O CNPJ informado não é de uma matriz"},
+        )
+
+    if pagina < 1:
+        pagina = 1
+    limit = 50
+    offset = (pagina - 1) * limit
+
+    # Total count
+    cur = await db.execute(
+        "SELECT COUNT(*) as total FROM estabelecimentos "
+        "WHERE cnpj_basico = ? AND identificador = '2'",
+        (basico,),
+    )
+    total = (await cur.fetchone())["total"]
+
+    # Page results
+    cur = await db.execute(
+        "SELECT cnpj_basico, cnpj_ordem, cnpj_dv, nome_fantasia, "
+        "situacao_cadastral, uf, municipio "
+        "FROM estabelecimentos "
+        "WHERE cnpj_basico = ? AND identificador = '2' "
+        "ORDER BY cnpj_ordem, cnpj_dv "
+        "LIMIT ? OFFSET ?",
+        (basico, limit, offset),
+    )
+    rows = await cur.fetchall()
+
+    mun_codes = {r["municipio"] for r in rows if r["municipio"]}
+    mun_map = await _batch_lookup(db, "municipios", mun_codes)
+
+    filiais = []
+    for r in rows:
+        cnpj_full = f"{r['cnpj_basico']}{r['cnpj_ordem']}{r['cnpj_dv']}"
+        sit = r["situacao_cadastral"] or ""
+        filiais.append({
+            "cnpj": cnpj_full,
+            "nome_fantasia": r["nome_fantasia"] or None,
+            "situacao_cadastral": {
+                "codigo": sit,
+                "descricao": SITUACAO_MAP.get(sit, ""),
+            },
+            "uf": r["uf"] or None,
+            "municipio": _code_desc(r["municipio"], mun_map.get(r["municipio"])),
+        })
+
+    total_paginas = (total + limit - 1) // limit if total > 0 else 0
+
+    return {
+        "cnpj_matriz": digits,
+        "total_filiais": total,
+        "pagina": pagina,
+        "total_paginas": total_paginas,
+        "filiais": filiais,
+    }
