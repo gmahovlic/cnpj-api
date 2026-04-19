@@ -8,8 +8,9 @@ User=root
 WorkingDirectory=/root/cnpj-api
 Environment=PATH=/root/cnpj-api/.venv/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/root/cnpj-api/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
-Restart=on-failure
+Restart=always
 RestartSec=5
+Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
