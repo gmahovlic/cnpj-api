@@ -17,7 +17,7 @@ async def verify_auth(request: Request) -> None:
     """
     checks = [
         (settings.rapidapi_proxy_secret, "x-rapidapi-proxy-secret"),
-        (settings.zyla_proxy_secret, "x-zyla-api-gateway-secret"),
+        (settings.zyla_proxy_secret, "authorization"),
         (settings.master_api_key, "x-api-key"),
     ]
 

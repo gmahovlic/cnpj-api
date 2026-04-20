@@ -327,7 +327,7 @@ async def consultar_cnpj(cnpj: str, db: aiosqlite.Connection = Depends(get_db)):
 @router.get("/cnpj/{cnpj}/filiais")
 async def listar_filiais(
     cnpj: str,
-    pagina: int = 1,
+    page: int = 1,
     db: aiosqlite.Connection = Depends(get_db),
 ):
     digits = _clean_cnpj(cnpj)
@@ -357,10 +357,10 @@ async def listar_filiais(
             detail={"error": "O CNPJ informado não é de uma matriz"},
         )
 
-    if pagina < 1:
-        pagina = 1
+    if page < 1:
+        page = 1
     limit = 50
-    offset = (pagina - 1) * limit
+    offset = (page - 1) * limit
 
     # Total count
     cur = await db.execute(
@@ -400,12 +400,12 @@ async def listar_filiais(
             "municipio": _code_desc(r["municipio"], mun_map.get(r["municipio"])),
         })
 
-    total_paginas = (total + limit - 1) // limit if total > 0 else 0
+    total_pages = (total + limit - 1) // limit if total > 0 else 0
 
     return {
         "cnpj_matriz": digits,
         "total_filiais": total,
-        "pagina": pagina,
-        "total_paginas": total_paginas,
+        "page": page,
+        "total_pages": total_pages,
         "filiais": filiais,
     }
