@@ -116,7 +116,15 @@ async def _batch_lookup(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/cnpj/{cnpj}")
+@router.get(
+    "/cnpj/{cnpj}",
+    summary="Consultar CNPJ",
+    description=(
+        "Retorna os dados cadastrais completos de um CNPJ, incluindo empresa, "
+        "estabelecimento, sócios, Simples Nacional, MEI e se possui filiais "
+        "(campo `hasBranches`)."
+    ),
+)
 async def consultar_cnpj(cnpj: str, db: aiosqlite.Connection = Depends(get_db)):
     digits = _clean_cnpj(cnpj)
     if len(digits) != 14:
@@ -164,6 +172,14 @@ async def consultar_cnpj(cnpj: str, db: aiosqlite.Connection = Depends(get_db)):
         "SELECT * FROM socios WHERE cnpj_basico = ?", (basico,)
     )
     socios_rows = await cur.fetchall()
+
+    # ---- Filiais (branches check) ----
+    cur = await db.execute(
+        "SELECT 1 FROM estabelecimentos "
+        "WHERE cnpj_basico = ? AND identificador = '2' LIMIT 1",
+        (basico,),
+    )
+    has_branches = await cur.fetchone() is not None
 
     # ---- Batch domain lookups ----
     nat_codes = {empresa["natureza_juridica"]} if empresa["natureza_juridica"] else set()
@@ -321,6 +337,7 @@ async def consultar_cnpj(cnpj: str, db: aiosqlite.Connection = Depends(get_db)):
             else None
         ),
         "socios": socios_list,
+        "hasBranches": has_branches,
     }
 
 
