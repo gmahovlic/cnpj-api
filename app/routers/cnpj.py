@@ -122,7 +122,7 @@ async def _batch_lookup(
     description=(
         "Retorna os dados cadastrais completos de um CNPJ, incluindo empresa, "
         "estabelecimento, sócios, Simples Nacional, MEI e se possui filiais "
-        "(campo `hasBranches`)."
+        "(campo `has_branches`)."
     ),
 )
 async def consultar_cnpj(cnpj: str, db: aiosqlite.Connection = Depends(get_db)):
@@ -337,7 +337,7 @@ async def consultar_cnpj(cnpj: str, db: aiosqlite.Connection = Depends(get_db)):
             else None
         ),
         "socios": socios_list,
-        "hasBranches": has_branches,
+        "has_branches": has_branches,
     }
 
 
