@@ -10,7 +10,7 @@ async def verify_auth(request: Request) -> None:
 
     Checks, in order:
         1. X-RapidAPI-Proxy-Secret
-        3. X-Zyla-API-Gateway-Secret
+        3. X-Zyla-Proxy-Secret
         4. X-API-Key  (master / direct access)
 
     If *no* secrets are configured at all the check is skipped (dev mode).
