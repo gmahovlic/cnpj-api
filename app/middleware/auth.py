@@ -17,7 +17,7 @@ async def verify_auth(request: Request) -> None:
     """
     checks = [
         (settings.rapidapi_proxy_secret, "x-rapidapi-proxy-secret"),
-        (settings.zyla_proxy_secret, "authorization"),
+        (settings.zyla_proxy_secret, "x-zyla-proxy-secret"),
         (settings.master_api_key, "x-api-key"),
     ]
 
@@ -29,9 +29,6 @@ async def verify_auth(request: Request) -> None:
 
     for secret, header in configured:
         value = request.headers.get(header, "")
-        # Strip "Bearer " prefix if present (e.g. Zyla sends Authorization: Bearer <secret>)
-        if value.lower().startswith("bearer "):
-            value = value[7:]
         if value and hmac.compare_digest(value, secret):
             return
 
